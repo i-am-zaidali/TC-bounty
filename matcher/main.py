@@ -114,7 +114,10 @@ class Matcher(commands.Cog):
 
     async def update_bio(self, member: discord.Member, bio):
         channel = member.guild.get_channel(await self.config.member(member).bio_channel())
-        message = await channel.fetch_message(await self.config.member(member).bio_message())
+        try:
+            message = await channel.fetch_message(await self.config.member(member).bio_message())
+        except (discord.NotFound, discord.Forbidden):
+            return await channel.send(embed=self.create_bio_embed(member, bio))
 
         await message.edit(embed=self.create_bio_embed(member, bio))
 
@@ -304,6 +307,8 @@ class Matcher(commands.Cog):
         question is the question itself. For example, "What is your favorite color?".
         """
         async with self.config.guild(ctx.guild).questions() as questions:
+            if any(q["key"] == key for q in questions):
+                return await ctx.send("Question with that key already exists.")
             questions.append(asdict(Question(question, preset_options, key)))
         await ctx.send("Question added.")
 
