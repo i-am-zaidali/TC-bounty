@@ -113,13 +113,48 @@ class Matcher(commands.Cog):
         return embed
 
     async def update_bio(self, member: discord.Member, bio):
-        channel = member.guild.get_channel(await self.config.member(member).bio_channel())
-        try:
-            message = await channel.fetch_message(await self.config.member(member).bio_message())
-        except (discord.NotFound, discord.Forbidden):
-            return await channel.send(embed=self.create_bio_embed(member, bio))
+        old_channel = self.bot.get_channel(await self.config.member(member).bio_channel())
+        old_message = await self.config.member(member).bio_message()
+        roles = await self.config.guild(member.guild).gender_status_roles()
+        role = list(roles.keys())[
+            list(roles.values()).index(set(roles.values()).intersection(set(member.roles)).pop())
+        ]
+        gender, status = role.split("_")
+        new_channel = member.guild.get_channel(
+            await self.config.guild(member.guild).bio_channel.get_attr(gender).get_attr(status)()
+        )
 
-        await message.edit(embed=self.create_bio_embed(member, bio))
+        if not new_channel and not old_channel:
+            return
+
+        if new_channel == old_channel:
+            try:
+                message = await old_channel.fetch_message(old_message)
+            except (discord.NotFound, discord.Forbidden):
+                return
+
+            else:
+                await message.edit(embed=self.create_bio_embed(member, bio))
+
+        else:
+            if old_channel:
+                try:
+                    message = await old_channel.fetch_message(old_message)
+                except (discord.NotFound, discord.Forbidden):
+                    pass
+
+                else:
+                    await message.delete()
+
+            if not new_channel:
+                return
+
+            new_message = await new_channel.send(
+                embed=self.create_bio_embed(member, await self.config.member(member).bio())
+            )
+
+            await self.config.member(member).bio_channel.set(new_channel)
+            await self.config.member(member).bio_message.set(new_message)
 
     @tasks.loop(hours=1)
     async def check_expired_matches(self):
