@@ -219,9 +219,13 @@ class Matcher(commands.Cog):
             if await self.config.member(after).registered():
                 return
 
+            await after.send(
+                f"Welcome to {after.guild.name}! Please answer the following questions to register."
+            )
+
             async with self.config.member(after).bio() as bio:
                 for question in await self.config.guild(after.guild).questions():
-                    answer = await self.ask_question(after, question)
+                    answer = await self.ask_question(after, after.dm_channel, question)
                     if answer is None:
                         return
 
@@ -388,7 +392,7 @@ class Matcher(commands.Cog):
                             await msg.edit(content="Timed out.")
                             return
                         if response.content.lower() == "y":
-                            answer = await self.ask_question(ctx.author, question)
+                            answer = await self.ask_question(ctx.author, ctx.channel, question)
                             bio[question["key"]] = answer
                         elif response.content.lower() == "n":
                             pass
@@ -396,7 +400,7 @@ class Matcher(commands.Cog):
                             await ctx.send("Invalid input.")
                             return
                     else:
-                        answer = await self.ask_question(ctx.author, question)
+                        answer = await self.ask_question(ctx.author, ctx.channel, question)
                         bio[question["key"]] = answer
 
         await ctx.send("Do you want to change your profile picture too? (y/n)")
@@ -416,17 +420,20 @@ class Matcher(commands.Cog):
 
             await self.config.member(ctx.author).profile_picture.set(image)
 
+        await self.update_bio(ctx.author, bio)
+
         await ctx.send("Bio updated.")
 
-    async def ask_question(self, member: discord.Member, question: dict):
+    async def ask_question(self, member: discord.Member, channel, question: dict):
         if question["preset_options"]:
             newline = "\n"
-            msg = await member.send(
-                f"Question: {question['question']}\nOptions: {newline.join(enumerate(question['preset_options'], 1))}\nAnswer: \nPlease reply with the number of your answer."
+            po = question["preset_options"]
+            msg = await channel.send(
+                f"Question: {question['question']}\nOptions:\n{newline.join([*(f'{ind}. {i}' for ind, i in enumerate(po, 1)), f'{len(po)+1}. Other (Use this option if you dont wanna select a preset)'])}\nPlease reply with the number of your answer."
             )
-            pred = lambda x: (p := MessagePredicate.valid_int(user=member))(
+            pred = lambda x: (p := MessagePredicate.valid_int(user=member, channel=channel))(
                 x
-            ) and p.result in range(1, len(question["preset_options"]) + 1)
+            ) and p.result in range(1, len(question["preset_options"]) + 2)
             try:
                 message = await self.bot.wait_for(
                     "message",
@@ -436,15 +443,29 @@ class Matcher(commands.Cog):
             except asyncio.TimeoutError:
                 await msg.edit(content="Timed out.")
                 return
-            return question["preset_options"][message.content - 1]
+            try:
+                return question["preset_options"][int(message.content) - 1]
+            except IndexError:
+                await channel.send("Please type your answer.")
+                try:
+                    message = await self.bot.wait_for(
+                        "message",
+                        check=MessagePredicate.same_context(user=member, channel=channel),
+                        timeout=60,
+                    )
+                    return message.content
+                except asyncio.TimeoutError:
+                    await msg.edit(content="Timed out.")
+                    return
+
         else:
-            msg = await member.send(
+            msg = await channel.send(
                 f"Question: {question['question']}\nAnswer: \nPlease type your answer."
             )
             try:
                 response = await self.bot.wait_for(
                     "message",
-                    check=lambda m: m.author == member and m.channel == member.dm_channel,
+                    check=MessagePredicate.same_context(user=member, channel=channel),
                     timeout=60,
                 )
             except asyncio.TimeoutError:
