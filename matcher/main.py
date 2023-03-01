@@ -207,6 +207,7 @@ class Matcher(commands.Cog):
                 await self.update_bio(after, bio)
 
         if before.roles != after.roles:
+            roles_changed = False
             roles = await self.config.guild(after.guild).gender_status_roles()
 
             if len(set(after._roles).intersection(roles.values())) > 1:
@@ -215,11 +216,46 @@ class Matcher(commands.Cog):
                 )
                 role_tr = [after.guild.get_role(role) for role in role_tr]
                 await after.remove_roles(*role_tr)
+                roles_changed = True
 
             if not set(after._roles).difference(before._roles).intersection(roles.values()):
                 return
 
+            role = list(roles.keys())[
+                list(roles.values()).index(set(after._roles).difference(before._roles).pop())
+            ]
+            gender, status = role.split("_")
+
             if await self.config.member(after).registered():
+                if roles_changed:
+                    old_channel = self.bot.get_channel(
+                        await self.config.member(after).bio_channel()
+                    )
+                    old_message = await self.config.member(after).bio_message()
+                    if old_channel:
+                        try:
+                            msg = await old_channel.fetch_message(old_message)
+                        except (discord.Forbidden, discord.HTTPException, discord.NotFound):
+                            pass
+
+                        else:
+                            await msg.delete()
+
+                    new_channel = after.guild.get_channel(
+                        await self.config.guild(after.guild)
+                        .bio_channel.get_attr(gender)
+                        .get_attr(status)()
+                    )
+                    if not new_channel:
+                        return
+
+                    new_message = await new_channel.send(
+                        embed=self.create_bio_embed(after, await self.config.member(after).bio())
+                    )
+
+                    await self.config.member(after).bio_channel.set(new_channel)
+                    await self.config.member(after).bio_message.set(new_message)
+
                 return
 
             await after.send(
@@ -256,11 +292,6 @@ class Matcher(commands.Cog):
             await self.config.member(after).profile_picture.set(image)
 
             await self.config.member(after).registered.set(True)
-
-            role = list(roles.keys())[
-                list(roles.values()).index(set(after._roles).difference(before._roles).pop())
-            ]
-            gender, status = role.split("_")
 
             channel = after.guild.get_channel(
                 await self.config.guild(after.guild)
