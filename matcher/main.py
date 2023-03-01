@@ -485,7 +485,7 @@ class Matcher(commands.Cog):
             return
 
         if pred.result:
-            image = await self.get_image(msg)
+            image = await self.get_image(ctx.guild, msg)
             if not image:
                 return await ctx.send("Invalid image.")
 
